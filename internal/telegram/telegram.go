@@ -72,7 +72,8 @@ func SendMessage(token, chatID, text string) error {
 }
 
 // SendPhoto загружает локальный файл как фото в канал. Возвращает message_id.
-func SendPhoto(token, chatID, filePath, caption string) (int64, error) {
+// parseMode: "" | "HTML" | "MarkdownV2" — как трактовать разметку в подписи.
+func SendPhoto(token, chatID, filePath, caption, parseMode string) (int64, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return 0, err
@@ -82,6 +83,9 @@ func SendPhoto(token, chatID, filePath, caption string) (int64, error) {
 	_ = w.WriteField("chat_id", chatID)
 	if caption != "" {
 		_ = w.WriteField("caption", caption)
+		if parseMode != "" {
+			_ = w.WriteField("parse_mode", parseMode)
+		}
 	}
 	fw, err := w.CreateFormFile("photo", filepath.Base(filePath))
 	if err != nil {

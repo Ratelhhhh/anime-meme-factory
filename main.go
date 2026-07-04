@@ -10,7 +10,10 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -91,11 +94,29 @@ func cmdRefill(cfg config.Config, force bool) error {
 		return nil
 	}
 
-	posts, err := pikabu.ListPosts(cfg.SourceUser, cfg.PostPrefix, cfg.MaxPostsPerRefill)
-	if err != nil {
-		return err
+	sources := cfg.SourceList()
+	if len(sources) == 0 {
+		return fmt.Errorf("не задан ни один источник (sources / source_user)")
 	}
-	fmt.Printf("Найдено постов автора: %d\n", len(posts))
+
+	// Собрать посты со всех источников (без дублей).
+	var posts []string
+	seenPost := map[string]bool{}
+	for _, src := range sources {
+		p, err := pikabu.ListPosts(src, cfg.PostPrefix, cfg.MaxPostsPerRefill)
+		if err != nil {
+			fmt.Printf("  ! источник @%s: %v\n", src, err)
+			continue
+		}
+		fmt.Printf("Источник @%s: постов %d\n", src, len(p))
+		for _, u := range p {
+			if !seenPost[u] {
+				seenPost[u] = true
+				posts = append(posts, u)
+			}
+		}
+		pikabu.PoliteSleep(cfg.RequestDelay)
+	}
 
 	newPosts, newImages := 0, 0
 	for _, url := range posts {
@@ -145,16 +166,46 @@ func cmdTick(cfg config.Config) error {
 		}
 	}
 
-	rows := st.NextQueued(cfg.BatchSize)
-	if len(rows) == 0 {
+	// Кандидаты — вся очередь по порядку; постим, пропуская дубликаты по хешу,
+	// пока не наберём batch_size уникальных картинок.
+	candidates := st.NextQueued(0)
+	if len(candidates) == 0 {
 		fmt.Println("Нечего постить: очередь пуста и новых картинок нет.")
 		return nil
 	}
 
-	posted := 0
-	for _, im := range rows {
+	posted, skipped := 0, 0
+	for _, im := range candidates {
+		if posted >= cfg.BatchSize {
+			break
+		}
 		tmp := filepath.Join(os.TempDir(), fmt.Sprintf("af_%d_%s", im.ID, filepath.Base(im.URL)))
-		msgID, err := postOne(cfg, im, tmp)
+
+		// Скачать и посчитать хеш содержимого.
+		size, err := pikabu.Download(im.URL, tmp)
+		if err == nil && size < 1024 {
+			err = fmt.Errorf("подозрительно маленький файл (%d байт)", size)
+		}
+		if err != nil {
+			os.Remove(tmp)
+			st.MarkFailed(im.ID, err.Error())
+			_ = st.Save()
+			fmt.Printf("ОШИБКА id=%d %s: %v\n", im.ID, im.URL, err)
+			continue
+		}
+
+		hash, herr := fileSHA256(tmp)
+		if herr == nil && st.HashSeen(hash) {
+			os.Remove(tmp)
+			st.MarkSkipped(im.ID, hash, "дубликат по хешу картинки")
+			_ = st.Save()
+			skipped++
+			fmt.Printf("ПРОПУСК id=%d (дубликат) %s\n", im.ID, im.URL)
+			continue
+		}
+
+		msgID, err := telegram.SendPhoto(cfg.TelegramToken, cfg.Channel, tmp,
+			cfg.Caption, cfg.CaptionParseMode)
 		os.Remove(tmp)
 		if err != nil {
 			st.MarkFailed(im.ID, err.Error())
@@ -162,26 +213,30 @@ func cmdTick(cfg config.Config) error {
 			fmt.Printf("ОШИБКА id=%d %s: %v\n", im.ID, im.URL, err)
 			continue
 		}
-		st.MarkPosted(im.ID)
+		st.MarkPosted(im.ID, hash)
 		if err := st.Save(); err != nil {
 			return err
 		}
 		posted++
 		fmt.Printf("OK опубликовано id=%d msg=%d %s\n", im.ID, msgID, im.URL)
 	}
-	fmt.Printf("Опубликовано за tick: %d. Осталось в очереди: %d.\n", posted, st.QueuedCount())
+	fmt.Printf("Опубликовано за tick: %d (пропущено дублей: %d). Осталось в очереди: %d.\n",
+		posted, skipped, st.QueuedCount())
 	return nil
 }
 
-func postOne(cfg config.Config, im store.Image, tmp string) (int64, error) {
-	size, err := pikabu.Download(im.URL, tmp)
+// fileSHA256 считает sha256 содержимого файла (hex).
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	if size < 1024 {
-		return 0, fmt.Errorf("подозрительно маленький файл (%d байт)", size)
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
 	}
-	return telegram.SendPhoto(cfg.TelegramToken, cfg.Channel, tmp, cfg.Caption)
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func cmdStatus() {
@@ -193,6 +248,7 @@ func cmdStatus() {
 	fmt.Printf("Постов просмотрено: %d\n", s.PostsSeen)
 	fmt.Printf("В очереди:          %d\n", s.Queued)
 	fmt.Printf("Опубликовано:       %d\n", s.Posted)
+	fmt.Printf("Пропущено дублей:   %d\n", s.Skipped)
 	fmt.Printf("Ошибок:             %d\n", s.Failed)
 }
 

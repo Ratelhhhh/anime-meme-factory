@@ -1,9 +1,10 @@
 {
   "telegram_token": "123456789:AAE...",
   "channel": "@anime_mem_mem",
-  "source_user": "BelarusPatriot",
+  "sources": ["BelarusPatriot"],
   "post_prefix": "animemyi_",
-  "caption": "",
+  "caption": "🎌 <a href=\"https://t.me/anime_mem_mem\">Аниме мемы — подписаться</a>",
+  "caption_parse_mode": "HTML",
   "batch_size": 1,
   "min_queue": 15,
   "max_posts_per_refill": 10,

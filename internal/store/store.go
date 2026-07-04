@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	StatusQueued = "queued"
-	StatusPosted = "posted"
-	StatusFailed = "failed"
+	StatusQueued  = "queued"
+	StatusPosted  = "posted"
+	StatusFailed  = "failed"
+	StatusSkipped = "skipped" // дубликат по хешу картинки
 )
 
 type Image struct {
@@ -21,22 +22,24 @@ type Image struct {
 	URL      string `json:"url"`
 	PostURL  string `json:"post_url"`
 	Status   string `json:"status"`
+	Hash     string `json:"hash,omitempty"` // sha256 содержимого картинки
 	AddedAt  int64  `json:"added_at"`
 	PostedAt int64  `json:"posted_at,omitempty"`
 	Error    string `json:"error,omitempty"`
 }
 
 type State struct {
-	Posts  map[string]int64 `json:"posts"` // url -> added_at
-	Images []Image          `json:"images"`
-	NextID int              `json:"next_id"`
+	Posts        map[string]int64 `json:"posts"`         // url -> added_at
+	Images       []Image          `json:"images"`
+	PostedHashes map[string]bool  `json:"posted_hashes"` // sha256 уже опубликованных картинок
+	NextID       int              `json:"next_id"`
 
 	path   string
 	urlSet map[string]bool // индекс URL картинок для быстрой проверки дублей
 }
 
 type Stats struct {
-	PostsSeen, Queued, Posted, Failed int
+	PostsSeen, Queued, Posted, Failed, Skipped int
 }
 
 func now() int64 { return time.Now().Unix() }
@@ -44,10 +47,11 @@ func now() int64 { return time.Now().Unix() }
 // Load читает состояние из файла (или создаёт пустое).
 func Load(path string) (*State, error) {
 	st := &State{
-		Posts:  map[string]int64{},
-		NextID: 1,
-		path:   path,
-		urlSet: map[string]bool{},
+		Posts:        map[string]int64{},
+		PostedHashes: map[string]bool{},
+		NextID:       1,
+		path:         path,
+		urlSet:       map[string]bool{},
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -61,6 +65,9 @@ func Load(path string) (*State, error) {
 	}
 	if st.Posts == nil {
 		st.Posts = map[string]int64{}
+	}
+	if st.PostedHashes == nil {
+		st.PostedHashes = map[string]bool{}
 	}
 	st.path = path
 	st.urlSet = make(map[string]bool, len(st.Images))
@@ -140,12 +147,33 @@ func (s *State) NextQueued(limit int) []Image {
 	return q
 }
 
-func (s *State) MarkPosted(id int) {
+// HashSeen сообщает, публиковалась ли уже картинка с таким содержимым.
+func (s *State) HashSeen(hash string) bool {
+	return hash != "" && s.PostedHashes[hash]
+}
+
+func (s *State) MarkPosted(id int, hash string) {
+	if hash != "" {
+		s.PostedHashes[hash] = true
+	}
 	for i := range s.Images {
 		if s.Images[i].ID == id {
 			s.Images[i].Status = StatusPosted
+			s.Images[i].Hash = hash
 			s.Images[i].PostedAt = now()
 			s.Images[i].Error = ""
+			return
+		}
+	}
+}
+
+// MarkSkipped помечает картинку как дубликат по хешу (в канал не пойдёт).
+func (s *State) MarkSkipped(id int, hash, reason string) {
+	for i := range s.Images {
+		if s.Images[i].ID == id {
+			s.Images[i].Status = StatusSkipped
+			s.Images[i].Hash = hash
+			s.Images[i].Error = reason
 			return
 		}
 	}
@@ -174,6 +202,8 @@ func (s *State) Stats() Stats {
 			st.Posted++
 		case StatusFailed:
 			st.Failed++
+		case StatusSkipped:
+			st.Skipped++
 		}
 	}
 	return st
