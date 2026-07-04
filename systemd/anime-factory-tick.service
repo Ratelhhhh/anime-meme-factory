@@ -1,0 +1,9 @@
+[Unit]
+Description=Anime meme factory — публикация картинки в Telegram
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ratelhhhh/anime-meme-factory-go
+ExecStart=/home/ratelhhhh/anime-meme-factory-go/factory tick
