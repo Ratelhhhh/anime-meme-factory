@@ -18,7 +18,9 @@ type Config struct {
 	BatchSize         int      `json:"batch_size"`         // сколько картинок постить за один tick
 	MinQueue          int      `json:"min_queue"`          // порог, ниже которого refill докачивает
 	MaxPostsPerRefill int      `json:"max_posts_per_refill"`
-	RequestDelay      float64  `json:"request_delay"` // пауза между запросами к Пикабу, сек
+	RequestDelay      float64  `json:"request_delay"`         // пауза между запросами к Пикабу, сек
+	TickIntervalMin   int      `json:"tick_interval_minutes"` // интервал таймера, мин (для наверстывания простоя)
+	MaxCatchup        int      `json:"max_catchup"`           // макс. картинок за один tick при наверстывании (0 = без лимита)
 }
 
 // SourceList возвращает список источников: sources, либо [source_user] для совместимости.
@@ -40,6 +42,8 @@ func defaults() Config {
 		MinQueue:          15,
 		MaxPostsPerRefill: 10,
 		RequestDelay:      1.5,
+		TickIntervalMin:   60,
+		MaxCatchup:        6,
 	}
 }
 

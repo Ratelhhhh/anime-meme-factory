@@ -29,10 +29,11 @@ type Image struct {
 }
 
 type State struct {
-	Posts        map[string]int64 `json:"posts"`         // url -> added_at
+	Posts        map[string]int64 `json:"posts"`               // url -> added_at
 	Images       []Image          `json:"images"`
-	PostedHashes map[string]bool  `json:"posted_hashes"` // sha256 уже опубликованных картинок
+	PostedHashes map[string]bool  `json:"posted_hashes"`       // sha256 уже опубликованных картинок
 	NextID       int              `json:"next_id"`
+	LastTickAt   int64            `json:"last_tick_at,omitempty"` // unix-время последнего успешного tick
 
 	path   string
 	urlSet map[string]bool // индекс URL картинок для быстрой проверки дублей
@@ -148,6 +149,12 @@ func (s *State) NextQueued(limit int) []Image {
 }
 
 // HashSeen сообщает, публиковалась ли уже картинка с таким содержимым.
+// TouchTick запоминает время последнего запуска публикации.
+func (s *State) TouchTick() { s.LastTickAt = now() }
+
+// LastTick возвращает unix-время последнего успешного tick (0, если ещё не было).
+func (s *State) LastTick() int64 { return s.LastTickAt }
+
 func (s *State) HashSeen(hash string) bool {
 	return hash != "" && s.PostedHashes[hash]
 }

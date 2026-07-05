@@ -16,6 +16,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/Ratelhhhh/anime-meme-factory/internal/config"
 	"github.com/Ratelhhhh/anime-meme-factory/internal/pikabu"
@@ -166,17 +167,24 @@ func cmdTick(cfg config.Config) error {
 		}
 	}
 
+	// Сколько картинок постить за этот tick. По умолчанию batch_size, но если ПК
+	// был выключен и таймер пропустил N интервалов — наверстаем пропущенное разом.
+	want := catchupCount(cfg, st.LastTick())
+
 	// Кандидаты — вся очередь по порядку; постим, пропуская дубликаты по хешу,
-	// пока не наберём batch_size уникальных картинок.
+	// пока не наберём want уникальных картинок.
 	candidates := st.NextQueued(0)
 	if len(candidates) == 0 {
 		fmt.Println("Нечего постить: очередь пуста и новых картинок нет.")
 		return nil
 	}
+	if want > 1 {
+		fmt.Printf("Наверстываю простой: постим до %d картинок за этот запуск.\n", want)
+	}
 
 	posted, skipped := 0, 0
 	for _, im := range candidates {
-		if posted >= cfg.BatchSize {
+		if posted >= want {
 			break
 		}
 		tmp := filepath.Join(os.TempDir(), fmt.Sprintf("af_%d_%s", im.ID, filepath.Base(im.URL)))
@@ -220,9 +228,37 @@ func cmdTick(cfg config.Config) error {
 		posted++
 		fmt.Printf("OK опубликовано id=%d msg=%d %s\n", im.ID, msgID, im.URL)
 	}
+	st.TouchTick()
+	if err := st.Save(); err != nil {
+		return err
+	}
 	fmt.Printf("Опубликовано за tick: %d (пропущено дублей: %d). Осталось в очереди: %d.\n",
 		posted, skipped, st.QueuedCount())
 	return nil
+}
+
+// catchupCount считает, сколько картинок постить за один tick: обычно batch_size,
+// но если с прошлого tick прошло несколько интервалов таймера (ПК был выключен) —
+// возвращает столько картинок, сколько слотов пропущено, с учётом max_catchup.
+func catchupCount(cfg config.Config, lastTick int64) int {
+	batch := cfg.BatchSize
+	if batch < 1 {
+		batch = 1
+	}
+	interval := cfg.TickIntervalMin
+	if lastTick == 0 || interval <= 0 {
+		return batch // первый запуск или наверстывание отключено
+	}
+	elapsedMin := (time.Now().Unix() - lastTick) / 60
+	slots := int(elapsedMin) / interval
+	if slots < 1 {
+		slots = 1
+	}
+	want := slots * batch
+	if cfg.MaxCatchup > 0 && want > cfg.MaxCatchup {
+		want = cfg.MaxCatchup
+	}
+	return want
 }
 
 // fileSHA256 считает sha256 содержимого файла (hex).

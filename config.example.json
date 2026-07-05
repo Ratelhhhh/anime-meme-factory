@@ -8,5 +8,7 @@
   "batch_size": 1,
   "min_queue": 15,
   "max_posts_per_refill": 10,
-  "request_delay": 1.5
+  "request_delay": 1.5,
+  "tick_interval_minutes": 60,
+  "max_catchup": 6
 }
