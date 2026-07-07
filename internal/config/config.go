@@ -14,6 +14,8 @@ type Config struct {
 	Sources           []string `json:"sources"`            // список авторов на Пикабу (приоритетнее source_user)
 	PostPrefix        string   `json:"post_prefix"`        // брать только посты с таким префиксом slug ("" = все)
 	MinRating         int      `json:"min_rating"`         // брать только посты с рейтингом >= этого (0 = без фильтра)
+	SingleImageOnly   bool     `json:"single_image_only"`  // брать только посты ровно с одной картинкой
+	MaxTextChars      int      `json:"max_text_chars"`     // пропускать посты с текстом длиннее этого (0 = без лимита)
 	Caption           string   `json:"caption"`            // необязательная подпись под картинкой
 	CaptionParseMode  string   `json:"caption_parse_mode"` // "" | "HTML" | "MarkdownV2" — для ссылок в подписи
 	BatchSize         int      `json:"batch_size"`         // сколько картинок постить за один tick

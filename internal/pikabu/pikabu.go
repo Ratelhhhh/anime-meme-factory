@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -21,6 +22,9 @@ var (
 	largeImgRe = regexp.MustCompile(`data-large-image="(https://cs\d+\.pikabu\.ru/[^"]+)"`)
 	// Рейтинг поста (плюсы минус минусы) — в атрибуте data-rating.
 	ratingRe = regexp.MustCompile(`data-rating="(-?\d+)"`)
+	// Текстовые блоки поста (для оценки объёма текста).
+	textBlockRe = regexp.MustCompile(`(?s)story-block story-block_type_text">(.*?)</div>`)
+	tagRe       = regexp.MustCompile(`<[^>]+>`)
 )
 
 func fetch(url string) ([]byte, error) {
@@ -45,9 +49,19 @@ func fetch(url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// ListPosts возвращает URL постов автора (в порядке появления на странице профиля).
-func ListPosts(sourceUser, prefix string, limit int) ([]string, error) {
-	body, err := fetch("https://pikabu.ru/@" + sourceUser)
+// sourceURL превращает источник в URL списка постов. Источник — либо ник автора
+// ("BelarusPatriot" → страница профиля), либо готовый URL (страница сообщества,
+// поиск с фильтрами и т.п.) — тогда берётся как есть.
+func sourceURL(source string) string {
+	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+		return source
+	}
+	return "https://pikabu.ru/@" + source
+}
+
+// ListPosts возвращает URL постов из источника (профиль автора или страница сообщества).
+func ListPosts(source, prefix string, limit int) ([]string, error) {
+	body, err := fetch(sourceURL(source))
 	if err != nil {
 		return nil, err
 	}
@@ -71,19 +85,36 @@ func ListPosts(sourceUser, prefix string, limit int) ([]string, error) {
 	return out, nil
 }
 
-// Info — разобранный пост: картинки и рейтинг.
+// Info — разобранный пост: картинки, рейтинг и объём текста.
 type Info struct {
-	Images []string
-	Rating int
+	Images  []string
+	Rating  int
+	TextLen int // примерная длина текста поста в символах
 }
 
-// PostInfo скачивает пост один раз и возвращает его картинки и рейтинг.
+// PostInfo скачивает пост один раз и возвращает его картинки, рейтинг и длину текста.
 func PostInfo(postURL string) (Info, error) {
 	body, err := fetch(postURL)
 	if err != nil {
 		return Info{}, err
 	}
-	return Info{Images: extractImages(body), Rating: extractRating(body)}, nil
+	return Info{
+		Images:  extractImages(body),
+		Rating:  extractRating(body),
+		TextLen: extractTextLen(body),
+	}, nil
+}
+
+// extractTextLen суммирует длину текстовых блоков поста (теги убраны).
+// Страница в cp1251, где кириллица — 1 байт на символ, так что длина в байтах
+// очищенного текста ≈ число символов.
+func extractTextLen(body []byte) int {
+	total := 0
+	for _, m := range textBlockRe.FindAllSubmatch(body, -1) {
+		clean := tagRe.ReplaceAll(m[1], nil)
+		total += len(strings.TrimSpace(string(clean)))
+	}
+	return total
 }
 
 // PostImages возвращает URL полноразмерных картинок поста (без дублей, по порядку).

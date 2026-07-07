@@ -147,11 +147,25 @@ func cmdRefill(cfg config.Config, force bool) error {
 			fmt.Printf("  ! %s: %v\n", url, err)
 			continue
 		}
-		// Слишком низкий рейтинг — пропускаем пост, но НЕ помечаем виденным,
-		// чтобы при следующем refill перепроверить (рейтинг мог подрасти).
+		base := filepath.Base(url)
+		// Постоянные свойства поста (не меняются) — помечаем виденным, чтобы не
+		// перепроверять каждый раз.
+		if cfg.SingleImageOnly && len(info.Images) != 1 {
+			st.MarkPostSeen(url)
+			_ = st.Save()
+			fmt.Printf("  - %s: картинок %d (нужна 1) — пропуск\n", base, len(info.Images))
+			continue
+		}
+		if cfg.MaxTextChars > 0 && info.TextLen > cfg.MaxTextChars {
+			st.MarkPostSeen(url)
+			_ = st.Save()
+			fmt.Printf("  - %s: текст %d симв. (>%d) — пропуск\n", base, info.TextLen, cfg.MaxTextChars)
+			continue
+		}
+		// Рейтинг — величина изменчивая, НЕ помечаем виденным: при следующем
+		// refill перепроверим (мог подрасти).
 		if cfg.MinRating > 0 && info.Rating < cfg.MinRating {
-			fmt.Printf("  - %s: рейтинг %d < %d — пропуск\n",
-				filepath.Base(url), info.Rating, cfg.MinRating)
+			fmt.Printf("  - %s: рейтинг %d < %d — пропуск\n", base, info.Rating, cfg.MinRating)
 			continue
 		}
 		// В режиме модерации картинки идут в PENDING (публикуются только после
@@ -174,7 +188,7 @@ func cmdRefill(cfg config.Config, force bool) error {
 		newPosts++
 		newImages += added
 		fmt.Printf("  + %s: рейтинг %d, картинок %d (новых %d)\n",
-			filepath.Base(url), info.Rating, len(imgs), added)
+			base, info.Rating, len(imgs), added)
 	}
 
 	fmt.Printf("Готово. Новых постов: %d, новых картинок: %d. В очереди: %d.\n",
