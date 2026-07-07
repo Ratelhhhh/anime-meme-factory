@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"time"
 )
 
@@ -18,6 +19,8 @@ var (
 	storyRe = regexp.MustCompile(`https://pikabu\.ru/story/[a-z0-9_]+`)
 	// Полноразмерные картинки поста лежат в data-large-image="...".
 	largeImgRe = regexp.MustCompile(`data-large-image="(https://cs\d+\.pikabu\.ru/[^"]+)"`)
+	// Рейтинг поста (плюсы минус минусы) — в атрибуте data-rating.
+	ratingRe = regexp.MustCompile(`data-rating="(-?\d+)"`)
 )
 
 func fetch(url string) ([]byte, error) {
@@ -68,12 +71,28 @@ func ListPosts(sourceUser, prefix string, limit int) ([]string, error) {
 	return out, nil
 }
 
-// PostImages возвращает URL полноразмерных картинок поста (без дублей, по порядку).
-func PostImages(postURL string) ([]string, error) {
+// Info — разобранный пост: картинки и рейтинг.
+type Info struct {
+	Images []string
+	Rating int
+}
+
+// PostInfo скачивает пост один раз и возвращает его картинки и рейтинг.
+func PostInfo(postURL string) (Info, error) {
 	body, err := fetch(postURL)
 	if err != nil {
-		return nil, err
+		return Info{}, err
 	}
+	return Info{Images: extractImages(body), Rating: extractRating(body)}, nil
+}
+
+// PostImages возвращает URL полноразмерных картинок поста (без дублей, по порядку).
+func PostImages(postURL string) ([]string, error) {
+	info, err := PostInfo(postURL)
+	return info.Images, err
+}
+
+func extractImages(body []byte) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, m := range largeImgRe.FindAllSubmatch(body, -1) {
@@ -84,7 +103,20 @@ func PostImages(postURL string) ([]string, error) {
 		seen[url] = true
 		out = append(out, url)
 	}
-	return out, nil
+	return out
+}
+
+// extractRating возвращает рейтинг поста (0, если не найден).
+func extractRating(body []byte) int {
+	m := ratingRe.FindSubmatch(body)
+	if m == nil {
+		return 0
+	}
+	n, err := strconv.Atoi(string(m[1]))
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // Download скачивает картинку на диск. Возвращает размер в байтах.

@@ -1,9 +1,10 @@
 {
   "telegram_token": "123456789:AAE...",
-  "channel": "@anime_mem_mem",
+  "channel": "@Yume_Girls_AI",
   "sources": ["BelarusPatriot"],
   "post_prefix": "animemyi_",
-  "caption": "🎌 <a href=\"https://t.me/anime_mem_mem\">Аниме мемы — подписаться</a>",
+  "min_rating": 100,
+  "caption": "🌸 <a href=\"https://t.me/Yume_Girls_AI\">Аниме — подписаться</a>",
   "caption_parse_mode": "HTML",
   "batch_size": 1,
   "min_queue": 15,

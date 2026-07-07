@@ -125,11 +125,19 @@ func cmdRefill(cfg config.Config, force bool) error {
 			continue
 		}
 		pikabu.PoliteSleep(cfg.RequestDelay)
-		imgs, err := pikabu.PostImages(url)
+		info, err := pikabu.PostInfo(url)
 		if err != nil {
 			fmt.Printf("  ! %s: %v\n", url, err)
 			continue
 		}
+		// Слишком низкий рейтинг — пропускаем пост, но НЕ помечаем виденным,
+		// чтобы при следующем refill перепроверить (рейтинг мог подрасти).
+		if cfg.MinRating > 0 && info.Rating < cfg.MinRating {
+			fmt.Printf("  - %s: рейтинг %d < %d — пропуск\n",
+				filepath.Base(url), info.Rating, cfg.MinRating)
+			continue
+		}
+		imgs := info.Images
 		added := 0
 		for _, im := range imgs {
 			if st.AddImage(im, url) {
@@ -142,7 +150,8 @@ func cmdRefill(cfg config.Config, force bool) error {
 		}
 		newPosts++
 		newImages += added
-		fmt.Printf("  + %s: картинок %d (новых %d)\n", filepath.Base(url), len(imgs), added)
+		fmt.Printf("  + %s: рейтинг %d, картинок %d (новых %d)\n",
+			filepath.Base(url), info.Rating, len(imgs), added)
 	}
 
 	fmt.Printf("Готово. Новых постов: %d, новых картинок: %d. В очереди: %d.\n",
@@ -241,19 +250,13 @@ func cmdTick(cfg config.Config) error {
 // но если с прошлого tick прошло несколько интервалов таймера (ПК был выключен) —
 // возвращает столько картинок, сколько слотов пропущено, с учётом max_catchup.
 func catchupCount(cfg config.Config, lastTick int64) int {
-	batch := cfg.BatchSize
-	if batch < 1 {
-		batch = 1
-	}
+	batch := max(cfg.BatchSize, 1)
 	interval := cfg.TickIntervalMin
 	if lastTick == 0 || interval <= 0 {
 		return batch // первый запуск или наверстывание отключено
 	}
 	elapsedMin := (time.Now().Unix() - lastTick) / 60
-	slots := int(elapsedMin) / interval
-	if slots < 1 {
-		slots = 1
-	}
+	slots := max(int(elapsedMin)/interval, 1)
 	want := slots * batch
 	if cfg.MaxCatchup > 0 && want > cfg.MaxCatchup {
 		want = cfg.MaxCatchup
