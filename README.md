@@ -130,8 +130,45 @@ systemctl --user disable --now anime-factory-tick.timer anime-factory-refill.tim
 | `factory refill` | добрать посты (если очередь < min_queue) |
 | `factory refill --force` | добрать принудительно |
 | `factory tick` | опубликовать следующие картинки |
+| `factory moderate` | локальная веб-панель модерации (для каналов с `moderation: true`) |
 | `factory status` | статистика очереди |
 | `factory parse <URL>` | показать картинки поста (отладка) |
+
+Любую команду можно запустить для другого канала через `--config`:
+`factory --config config.yume.json moderate`.
+
+## Ручная модерация (человек в цикле)
+
+Для каналов, где нельзя публиковать вслепую, есть режим модерации. Включается в
+конфиге:
+
+```json
+{ "moderation": true, "state_path": "data/yume-state.json", "moderate_port": 8099 }
+```
+
+Как работает:
+
+1. `refill` кладёт спарсенные картинки в статус **PENDING** — в канал они **не идут**.
+2. `factory --config config.yume.json moderate` поднимает панель на
+   `http://127.0.0.1:8099` (только localhost). Открываешь в браузере — сетка
+   превью с кнопками **✅ Одобрить / ❌ Отклонить**.
+3. Одобренные переходят в очередь публикации, отклонённые отсеиваются навсегда.
+4. `tick` публикует **только одобренные** — по одной в час, как обычно.
+
+Так ни одна картинка не попадает в канал без ручного «ок». `state_path` у каждого
+канала свой, поэтому каналы не мешают друг другу.
+
+Таймеры для второго канала (включать после того, как впишешь `sources` в
+`config.yume.json`):
+
+```bash
+cp systemd/anime-factory-yume-*.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now anime-factory-yume-refill.timer anime-factory-yume-tick.timer
+```
+
+Панель модерации запускается вручную, когда садишься разгребать очередь:
+`./factory --config config.yume.json moderate`.
 
 ## Заметки
 

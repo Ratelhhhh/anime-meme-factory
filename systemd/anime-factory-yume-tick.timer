@@ -1,0 +1,10 @@
+[Unit]
+Description=Публикация одобренной картинки в Yume_Girls_AI раз в час
+
+[Timer]
+OnBootSec=4min
+OnUnitActiveSec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

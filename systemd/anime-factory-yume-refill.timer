@@ -1,0 +1,10 @@
+[Unit]
+Description=Сбор кандидатов на модерацию для Yume_Girls_AI раз в 12 часов
+
+[Timer]
+OnBootSec=6min
+OnUnitActiveSec=12h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

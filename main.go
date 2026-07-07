@@ -24,17 +24,21 @@ import (
 	"github.com/Ratelhhhh/anime-meme-factory/internal/telegram"
 )
 
-const (
-	configPath = "config.json"
-	statePath  = "data/state.json"
-)
+const defaultConfigPath = "config.json"
 
 func main() {
-	if len(os.Args) < 2 {
+	// Необязательный ведущий флаг --config/-c <path> для выбора канала.
+	args := os.Args[1:]
+	configPath := defaultConfigPath
+	if len(args) >= 2 && (args[0] == "--config" || args[0] == "-c") {
+		configPath = args[1]
+		args = args[2:]
+	}
+	if len(args) < 1 {
 		usage()
 		return
 	}
-	cmd := os.Args[1]
+	cmd := args[0]
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -46,7 +50,7 @@ func main() {
 		mustRequire(cfg)
 		cmdCheck(cfg)
 	case "refill":
-		force := len(os.Args) > 2 && os.Args[2] == "--force"
+		force := len(args) > 1 && args[1] == "--force"
 		if err := cmdRefill(cfg, force); err != nil {
 			fatal(err)
 		}
@@ -55,17 +59,30 @@ func main() {
 		if err := cmdTick(cfg); err != nil {
 			fatal(err)
 		}
+	case "moderate":
+		mustRequire(cfg)
+		if err := cmdModerate(cfg); err != nil {
+			fatal(err)
+		}
 	case "status":
-		cmdStatus()
+		cmdStatus(cfg)
 	case "parse":
-		if len(os.Args) < 3 {
+		if len(args) < 2 {
 			fatal(fmt.Errorf("укажи URL поста"))
 		}
-		cmdParse(os.Args[2])
+		cmdParse(args[1])
 	default:
 		fmt.Printf("Неизвестная команда: %s\n\n", cmd)
 		usage()
 	}
+}
+
+// statePathOf возвращает путь к состоянию канала (из конфига, с запасным дефолтом).
+func statePathOf(cfg config.Config) string {
+	if cfg.StatePath != "" {
+		return cfg.StatePath
+	}
+	return "data/state.json"
 }
 
 func cmdCheck(cfg config.Config) {
@@ -85,7 +102,7 @@ func cmdCheck(cfg config.Config) {
 }
 
 func cmdRefill(cfg config.Config, force bool) error {
-	st, err := store.Load(statePath)
+	st, err := store.Load(statePathOf(cfg))
 	if err != nil {
 		return err
 	}
@@ -137,10 +154,16 @@ func cmdRefill(cfg config.Config, force bool) error {
 				filepath.Base(url), info.Rating, cfg.MinRating)
 			continue
 		}
+		// В режиме модерации картинки идут в PENDING (публикуются только после
+		// ручного одобрения через веб-панель), иначе сразу в очередь.
+		status := store.StatusQueued
+		if cfg.Moderation {
+			status = store.StatusPending
+		}
 		imgs := info.Images
 		added := 0
 		for _, im := range imgs {
-			if st.AddImage(im, url) {
+			if _, ok := st.AddImage(im, url, status); ok {
 				added++
 			}
 		}
@@ -160,17 +183,18 @@ func cmdRefill(cfg config.Config, force bool) error {
 }
 
 func cmdTick(cfg config.Config) error {
-	st, err := store.Load(statePath)
+	st, err := store.Load(statePathOf(cfg))
 	if err != nil {
 		return err
 	}
-	// Пустая очередь — попробовать докинуть постов.
-	if st.QueuedCount() == 0 {
+	// Пустая очередь — попробовать докинуть постов. В режиме модерации не
+	// докидываем: пустая очередь публикации значит «ещё ничего не одобрено».
+	if !cfg.Moderation && st.QueuedCount() == 0 {
 		fmt.Println("Очередь пуста — запускаю refill...")
 		if err := cmdRefill(cfg, true); err != nil {
 			return err
 		}
-		st, err = store.Load(statePath)
+		st, err = store.Load(statePathOf(cfg))
 		if err != nil {
 			return err
 		}
@@ -278,13 +302,18 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func cmdStatus() {
-	st, err := store.Load(statePath)
+func cmdStatus(cfg config.Config) {
+	st, err := store.Load(statePathOf(cfg))
 	if err != nil {
 		fatal(err)
 	}
 	s := st.Stats()
+	fmt.Printf("Канал:              %s\n", cfg.Channel)
 	fmt.Printf("Постов просмотрено: %d\n", s.PostsSeen)
+	if cfg.Moderation {
+		fmt.Printf("На модерации:       %d\n", s.Pending)
+		fmt.Printf("Отклонено:          %d\n", s.Rejected)
+	}
 	fmt.Printf("В очереди:          %d\n", s.Queued)
 	fmt.Printf("Опубликовано:       %d\n", s.Posted)
 	fmt.Printf("Пропущено дублей:   %d\n", s.Skipped)
@@ -317,11 +346,18 @@ func usage() {
 	fmt.Print(`Anime Meme Factory
 
 Использование:
-  factory check         проверить бота и канал (тест)
-  factory refill        наполнить очередь новыми постами Пикабу
-  factory refill --force  наполнить принудительно
-  factory tick           опубликовать следующие картинки
-  factory status         статистика очереди
-  factory parse <URL>    показать картинки поста (отладка)
+  factory [--config <файл>] <команда>
+
+Команды:
+  check         проверить бота и канал (тест)
+  refill        наполнить очередь новыми постами Пикабу
+  refill --force  наполнить принудительно
+  tick          опубликовать следующие картинки
+  moderate      локальная веб-панель модерации (для каналов с moderation=true)
+  status        статистика очереди
+  parse <URL>   показать картинки поста (отладка)
+
+--config <файл> — какой канал (по умолчанию config.json). Пример:
+  factory --config config.yume.json moderate
 `)
 }

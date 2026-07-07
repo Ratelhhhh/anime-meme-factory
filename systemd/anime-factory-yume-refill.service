@@ -1,0 +1,9 @@
+[Unit]
+Description=Yume factory — сбор кандидатов на модерацию (Yume_Girls_AI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ratelhhhh/anime-meme-factory-go
+ExecStart=/home/ratelhhhh/anime-meme-factory-go/factory --config config.yume.json refill

@@ -22,6 +22,9 @@ type Config struct {
 	RequestDelay      float64  `json:"request_delay"`         // пауза между запросами к Пикабу, сек
 	TickIntervalMin   int      `json:"tick_interval_minutes"` // интервал таймера, мин (для наверстывания простоя)
 	MaxCatchup        int      `json:"max_catchup"`           // макс. картинок за один tick при наверстывании (0 = без лимита)
+	Moderation        bool     `json:"moderation"`            // true = картинки идут в PENDING и публикуются только после ручного одобрения
+	StatePath         string   `json:"state_path"`            // путь к файлу состояния (для нескольких каналов — свой на каждый)
+	ModeratePort      int      `json:"moderate_port"`         // порт локальной веб-панели модерации
 }
 
 // SourceList возвращает список источников: sources, либо [source_user] для совместимости.
@@ -45,6 +48,8 @@ func defaults() Config {
 		RequestDelay:      1.5,
 		TickIntervalMin:   60,
 		MaxCatchup:        6,
+		StatePath:         "data/state.json",
+		ModeratePort:      8099,
 	}
 }
 

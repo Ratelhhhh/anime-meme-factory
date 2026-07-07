@@ -11,10 +11,12 @@ import (
 )
 
 const (
-	StatusQueued  = "queued"
-	StatusPosted  = "posted"
-	StatusFailed  = "failed"
-	StatusSkipped = "skipped" // дубликат по хешу картинки
+	StatusPending  = "pending" // ждёт ручной модерации (в очередь публикации не идёт)
+	StatusQueued   = "queued"
+	StatusPosted   = "posted"
+	StatusFailed   = "failed"
+	StatusSkipped  = "skipped"  // дубликат по хешу картинки
+	StatusRejected = "rejected" // отклонён модератором
 )
 
 type Image struct {
@@ -40,7 +42,7 @@ type State struct {
 }
 
 type Stats struct {
-	PostsSeen, Queued, Posted, Failed, Skipped int
+	PostsSeen, Pending, Queued, Posted, Failed, Skipped, Rejected int
 }
 
 func now() int64 { return time.Now().Unix() }
@@ -106,21 +108,67 @@ func (s *State) MarkPostSeen(url string) {
 	s.Posts[url] = now()
 }
 
-// AddImage добавляет картинку в очередь. Возвращает true, если добавлена (не дубль).
-func (s *State) AddImage(url, postURL string) bool {
+// AddImage добавляет картинку со статусом status (queued или pending).
+// Возвращает id новой картинки и true, если добавлена (0/false — дубль).
+func (s *State) AddImage(url, postURL, status string) (int, bool) {
 	if s.urlSet[url] {
-		return false
+		return 0, false
 	}
 	s.urlSet[url] = true
+	id := s.NextID
 	s.Images = append(s.Images, Image{
-		ID:      s.NextID,
+		ID:      id,
 		URL:     url,
 		PostURL: postURL,
-		Status:  StatusQueued,
+		Status:  status,
 		AddedAt: now(),
 	})
 	s.NextID++
-	return true
+	return id, true
+}
+
+// PendingImages возвращает картинки на модерации (по возрастанию ID).
+func (s *State) PendingImages() []Image {
+	var q []Image
+	for _, im := range s.Images {
+		if im.Status == StatusPending {
+			q = append(q, im)
+		}
+	}
+	sort.Slice(q, func(i, j int) bool { return q[i].ID < q[j].ID })
+	return q
+}
+
+// ImageByID возвращает картинку по id (и false, если не найдена).
+func (s *State) ImageByID(id int) (Image, bool) {
+	for _, im := range s.Images {
+		if im.ID == id {
+			return im, true
+		}
+	}
+	return Image{}, false
+}
+
+// Approve переводит картинку из модерации в очередь публикации.
+func (s *State) Approve(id int) bool {
+	for i := range s.Images {
+		if s.Images[i].ID == id && s.Images[i].Status == StatusPending {
+			s.Images[i].Status = StatusQueued
+			return true
+		}
+	}
+	return false
+}
+
+// Reject помечает картинку отклонённой (в канал не пойдёт).
+func (s *State) Reject(id int) bool {
+	for i := range s.Images {
+		if s.Images[i].ID == id && s.Images[i].Status == StatusPending {
+			s.Images[i].Status = StatusRejected
+			return true
+		}
+	}
+	return false
 }
 
 func (s *State) QueuedCount() int {
@@ -203,6 +251,8 @@ func (s *State) Stats() Stats {
 	st := Stats{PostsSeen: len(s.Posts)}
 	for _, im := range s.Images {
 		switch im.Status {
+		case StatusPending:
+			st.Pending++
 		case StatusQueued:
 			st.Queued++
 		case StatusPosted:
@@ -211,6 +261,8 @@ func (s *State) Stats() Stats {
 			st.Failed++
 		case StatusSkipped:
 			st.Skipped++
+		case StatusRejected:
+			st.Rejected++
 		}
 	}
 	return st
