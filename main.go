@@ -44,6 +44,7 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
+	pikabu.SetCookie(cfg.PikabuCookie)
 
 	switch cmd {
 	case "check":

@@ -15,6 +15,13 @@ import (
 const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
 	"(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 
+// authCookie — Cookie залогиненной сессии Пикабу (для 18+ контента за возрастным
+// гейтом). Пусто = ходим анонимно.
+var authCookie string
+
+// SetCookie задаёт Cookie, который будет слаться со всеми запросами к Пикабу.
+func SetCookie(c string) { authCookie = c }
+
 var (
 	// Ссылки на посты в профиле автора.
 	storyRe = regexp.MustCompile(`https://pikabu\.ru/story/[a-z0-9_]+`)
@@ -35,6 +42,9 @@ func fetch(url string) ([]byte, error) {
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml")
 	req.Header.Set("Accept-Language", "ru,en;q=0.9")
+	if authCookie != "" {
+		req.Header.Set("Cookie", authCookie)
+	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -158,6 +168,9 @@ func Download(url, dest string) (int, error) {
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Referer", "https://pikabu.ru/")
+	if authCookie != "" {
+		req.Header.Set("Cookie", authCookie)
+	}
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)

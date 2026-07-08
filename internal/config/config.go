@@ -29,6 +29,7 @@ type Config struct {
 	ModeratePort      int      `json:"moderate_port"`         // порт локальной веб-панели модерации (moderate)
 	ModerationChat    string   `json:"moderation_chat"`       // куда слать карточки (пусто = в личку owner_id)
 	OwnerID           int64    `json:"owner_id"`              // единственный user_id, кому разрешено управлять ботом
+	PikabuCookie      string   `json:"pikabu_cookie"`         // Cookie залогиненной сессии Пикабу (для доступа к 18+ картинкам)
 }
 
 // SourceList возвращает список источников: sources, либо [source_user] для совместимости.
