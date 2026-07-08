@@ -24,7 +24,8 @@ type Image struct {
 	URL      string `json:"url"`
 	PostURL  string `json:"post_url"`
 	Status   string `json:"status"`
-	Hash     string `json:"hash,omitempty"` // sha256 содержимого картинки
+	Hash     string `json:"hash,omitempty"`         // sha256 содержимого картинки
+	ModMsgID int64  `json:"mod_msg_id,omitempty"`   // message_id карточки в чате модерации (0 = ещё не отправляли)
 	AddedAt  int64  `json:"added_at"`
 	PostedAt int64  `json:"posted_at,omitempty"`
 	Error    string `json:"error,omitempty"`
@@ -137,6 +138,29 @@ func (s *State) PendingImages() []Image {
 	}
 	sort.Slice(q, func(i, j int) bool { return q[i].ID < q[j].ID })
 	return q
+}
+
+// PendingUnsent возвращает картинки на модерации, ещё не отправленные в чат
+// модерации (ModMsgID == 0), по возрастанию ID.
+func (s *State) PendingUnsent() []Image {
+	var q []Image
+	for _, im := range s.Images {
+		if im.Status == StatusPending && im.ModMsgID == 0 {
+			q = append(q, im)
+		}
+	}
+	sort.Slice(q, func(i, j int) bool { return q[i].ID < q[j].ID })
+	return q
+}
+
+// SetModMsg запоминает message_id карточки модерации для картинки.
+func (s *State) SetModMsg(id int, msgID int64) {
+	for i := range s.Images {
+		if s.Images[i].ID == id {
+			s.Images[i].ModMsgID = msgID
+			return
+		}
+	}
 }
 
 // ImageByID возвращает картинку по id (и false, если не найдена).

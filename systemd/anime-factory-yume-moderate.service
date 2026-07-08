@@ -1,0 +1,14 @@
+[Unit]
+Description=Yume factory — бот-модератор (рассылает кандидатов с кнопками, ловит нажатия)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ratelhhhh/anime-meme-factory-go
+ExecStart=/home/ratelhhhh/anime-meme-factory-go/factory --config config.yume.json moderate-bot
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

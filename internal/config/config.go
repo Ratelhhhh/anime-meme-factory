@@ -26,7 +26,8 @@ type Config struct {
 	MaxCatchup        int      `json:"max_catchup"`           // макс. картинок за один tick при наверстывании (0 = без лимита)
 	Moderation        bool     `json:"moderation"`            // true = картинки идут в PENDING и публикуются только после ручного одобрения
 	StatePath         string   `json:"state_path"`            // путь к файлу состояния (для нескольких каналов — свой на каждый)
-	ModeratePort      int      `json:"moderate_port"`         // порт локальной веб-панели модерации
+	ModeratePort      int      `json:"moderate_port"`         // порт локальной веб-панели модерации (moderate)
+	ModerationChat    string   `json:"moderation_chat"`       // чат/канал, куда бот шлёт кандидатов с кнопками (moderate-bot)
 }
 
 // SourceList возвращает список источников: sources, либо [source_user] для совместимости.

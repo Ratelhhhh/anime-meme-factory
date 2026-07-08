@@ -166,6 +166,33 @@ systemctl --user disable --now anime-factory-tick.timer anime-factory-refill.tim
 Так ни одна картинка не попадает в канал без ручного «ок». `state_path` у каждого
 канала свой, поэтому каналы не мешают друг другу.
 
+### Модерация через бота (удобно с телефона)
+
+Вместо веб-панели можно модерировать прямо в Telegram: бот шлёт каждого кандидата
+в приватный чат модерации с кнопками **✅ Одобрить / ❌ Отклонить**.
+
+1. Создай приватную группу (или канал), добавь туда бота (для группы — сделай
+   администратором).
+2. Узнай id чата: `./factory --config config.yume.json chatid`, затем напиши
+   что-нибудь в группе — команда напечатает `id=...`. Впиши его в
+   `moderation_chat` в конфиге.
+3. Собери кандидатов: `./factory --config config.yume.json refill`.
+4. Запусти бота-модератора: `./factory --config config.yume.json moderate-bot`.
+   В чат модерации придут карточки с картинками и кнопками. Жмёшь — одобренные
+   уходят в очередь публикации, отклонённые отсеиваются.
+
+Бот-модератор — постоянно работающий процесс; ставится сервисом
+`anime-factory-yume-moderate.service` (`Restart=always`), чтобы висел всегда:
+
+```bash
+cp systemd/anime-factory-yume-moderate.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now anime-factory-yume-moderate.service
+```
+
+Веб-панель (`factory moderate`) и бот (`moderate-bot`) взаимозаменяемы — выбирай
+что удобнее; состояние у них общее.
+
 Таймеры для второго канала (включать после того, как впишешь `sources` в
 `config.yume.json`):
 

@@ -64,6 +64,16 @@ func main() {
 		if err := cmdModerate(cfg); err != nil {
 			fatal(err)
 		}
+	case "moderate-bot":
+		mustRequire(cfg)
+		if err := cmdModerateBot(cfg); err != nil {
+			fatal(err)
+		}
+	case "chatid":
+		mustRequire(cfg)
+		if err := cmdChatID(cfg); err != nil {
+			fatal(err)
+		}
 	case "status":
 		cmdStatus(cfg)
 	case "parse":
@@ -368,6 +378,8 @@ func usage() {
   refill --force  наполнить принудительно
   tick          опубликовать следующие картинки
   moderate      локальная веб-панель модерации (для каналов с moderation=true)
+  moderate-bot  модерация через бота: кандидаты с кнопками в чат модерации
+  chatid        узнать id чата (для настройки moderation_chat)
   status        статистика очереди
   parse <URL>   показать картинки поста (отладка)
 
