@@ -27,7 +27,8 @@ type Config struct {
 	Moderation        bool     `json:"moderation"`            // true = картинки идут в PENDING и публикуются только после ручного одобрения
 	StatePath         string   `json:"state_path"`            // путь к файлу состояния (для нескольких каналов — свой на каждый)
 	ModeratePort      int      `json:"moderate_port"`         // порт локальной веб-панели модерации (moderate)
-	ModerationChat    string   `json:"moderation_chat"`       // чат/канал, куда бот шлёт кандидатов с кнопками (moderate-bot)
+	ModerationChat    string   `json:"moderation_chat"`       // куда слать карточки (пусто = в личку owner_id)
+	OwnerID           int64    `json:"owner_id"`              // единственный user_id, кому разрешено управлять ботом
 }
 
 // SourceList возвращает список источников: sources, либо [source_user] для совместимости.

@@ -14,32 +14,32 @@ import (
 	"github.com/Ratelhhhh/anime-meme-factory/internal/telegram"
 )
 
-// cmdModerateBot — модерация через бота: рассылает картинки на модерации в чат
-// модерации с кнопками «Одобрить/Отклонить» и ловит нажатия. Одобренные уходят
-// в очередь публикации, отклонённые отсеиваются. Ничего не публикуется в канал
-// без нажатия «Одобрить».
+// cmdModerateBot — интерактивный бот-модератор. Ты пишешь ему в личку команды
+// (refill / status), он присылает картинки на модерацию с кнопками
+// «Одобрить/Отклонить». Пользоваться может ТОЛЬКО owner_id — остальным отказ.
+// Ничего не публикуется в канал без нажатия «Одобрить».
 func cmdModerateBot(cfg config.Config) error {
-	if cfg.ModerationChat == "" {
-		return fmt.Errorf("не задан moderation_chat в конфиге.\n" +
-			"Создай приватную группу/канал, добавь бота, узнай id командой:\n" +
-			"  factory --config <файл> chatid\n" +
-			"и впиши его в moderation_chat.")
+	if cfg.OwnerID == 0 {
+		return fmt.Errorf("не задан owner_id в конфиге.\n" +
+			"Узнай свой user_id: `factory --config <файл> chatid`, напиши боту в личку,\n" +
+			"и впиши число в owner_id.")
 	}
 	statePath := statePathOf(cfg)
 	tmpdir := filepath.Join(filepath.Dir(statePath), "modtmp")
 	if err := os.MkdirAll(tmpdir, 0o755); err != nil {
 		return err
 	}
+	// Куда слать карточки: явный moderation_chat или личка владельца.
+	modChat := cfg.ModerationChat
+	if modChat == "" {
+		modChat = strconv.FormatInt(cfg.OwnerID, 10)
+	}
 
-	fmt.Printf("Бот-модератор запущен. Кандидаты идут в %s (канал %s).\n",
-		cfg.ModerationChat, cfg.Channel)
-	fmt.Println("Жми кнопки под картинками в чате модерации. Ctrl+C — остановить.")
+	fmt.Printf("Бот-модератор запущен. Владелец: %d, канал: %s.\n", cfg.OwnerID, cfg.Channel)
+	fmt.Println("Напиши боту в личку: refill (собрать) / status. Ctrl+C — остановить.")
 
 	var offset int64
 	for {
-		if err := pushPending(cfg, statePath, tmpdir); err != nil {
-			fmt.Printf("push: %v\n", err)
-		}
 		updates, err := telegram.GetUpdates(cfg.TelegramToken, offset, 25)
 		if err != nil {
 			fmt.Printf("getUpdates: %v\n", err)
@@ -48,56 +48,106 @@ func cmdModerateBot(cfg config.Config) error {
 		}
 		for _, u := range updates {
 			offset = u.UpdateID + 1
-			handleUpdate(cfg, statePath, u)
+			switch {
+			case u.CallbackQuery != nil:
+				handleCallback(cfg, statePath, modChat, u.CallbackQuery)
+			case u.Message != nil && u.Message.Text != "":
+				handleCommand(cfg, statePath, tmpdir, modChat, u.Message)
+			}
 		}
 	}
 }
 
-// pushPending отправляет в чат модерации все картинки на модерации, которые ещё
-// не отправляли (по одной карточке с кнопками).
-func pushPending(cfg config.Config, statePath, tmpdir string) error {
+// authorized проверяет, что действие исходит от владельца.
+func authorized(from *telegram.User, ownerID int64) bool {
+	return from != nil && from.ID == ownerID
+}
+
+// handleCommand обрабатывает текстовые команды владельца в личке.
+func handleCommand(cfg config.Config, statePath, tmpdir, modChat string, m *telegram.Message) {
+	chat := strconv.FormatInt(m.Chat.ID, 10)
+	if !authorized(m.From, cfg.OwnerID) {
+		_ = telegram.SendMessage(cfg.TelegramToken, chat, "⛔ Доступ запрещён.")
+		return
+	}
+	cmd := strings.ToLower(strings.TrimPrefix(strings.Fields(m.Text)[0], "/"))
+	switch cmd {
+	case "refill":
+		_ = telegram.SendMessage(cfg.TelegramToken, chat, "🔎 Собираю кандидатов, подожди…")
+		if err := cmdRefill(cfg, true); err != nil {
+			_ = telegram.SendMessage(cfg.TelegramToken, chat, "Ошибка refill: "+err.Error())
+			return
+		}
+		sent, err := pushPending(cfg, statePath, tmpdir, modChat)
+		if err != nil {
+			_ = telegram.SendMessage(cfg.TelegramToken, chat, "Прислал часть, потом сбой: "+err.Error())
+		}
+		st, _ := store.Load(statePath)
+		s := st.Stats()
+		_ = telegram.SendMessage(cfg.TelegramToken, chat,
+			fmt.Sprintf("Готово. Прислал карточек: %d. Всего на модерации: %d. Одобрено в очереди: %d.",
+				sent, s.Pending, s.Queued))
+	case "status":
+		st, _ := store.Load(statePath)
+		s := st.Stats()
+		_ = telegram.SendMessage(cfg.TelegramToken, chat, fmt.Sprintf(
+			"Канал: %s\nНа модерации: %d\nОдобрено (в очереди): %d\nОпубликовано: %d\nОтклонено: %d",
+			cfg.Channel, s.Pending, s.Queued, s.Posted, s.Rejected))
+	case "start", "help":
+		_ = telegram.SendMessage(cfg.TelegramToken, chat,
+			"Я бот-модератор канала "+cfg.Channel+".\n\n"+
+				"refill — собрать новых кандидатов и прислать карточки\n"+
+				"status — статистика\n\n"+
+				"Под каждой картинкой — кнопки ✅ Одобрить / ❌ Отклонить. "+
+				"Одобренные публикуются в канал по одной в час.")
+	default:
+		_ = telegram.SendMessage(cfg.TelegramToken, chat, "Не понял. Команды: refill, status.")
+	}
+}
+
+// pushPending отправляет владельцу все картинки на модерации, ещё не отправленные.
+// Возвращает число отправленных карточек.
+func pushPending(cfg config.Config, statePath, tmpdir, modChat string) (int, error) {
 	st, err := store.Load(statePath)
 	if err != nil {
-		return err
+		return 0, err
 	}
+	sent := 0
 	for _, im := range st.PendingUnsent() {
 		tmp := filepath.Join(tmpdir, strconv.Itoa(im.ID))
 		if _, err := pikabu.Download(im.URL, tmp); err != nil {
-			// битый/недоступный url — помечаем, чтобы не долбить каждый цикл
-			st.MarkFailed(im.ID, "модерация: скачивание не удалось: "+err.Error())
-			_ = st.Save()
-			fmt.Printf("  ! id=%d скачивание: %v\n", im.ID, err)
+			fresh, _ := store.Load(statePath)
+			fresh.MarkFailed(im.ID, "модерация: скачивание не удалось: "+err.Error())
+			_ = fresh.Save()
 			continue
 		}
-		caption := fmt.Sprintf("id %d · рейтинг≥%d\nисточник: %s", im.ID, cfg.MinRating, im.PostURL)
+		caption := fmt.Sprintf("id %d\nисточник: %s", im.ID, im.PostURL)
 		buttons := [][]telegram.InlineButton{{
 			{Text: "✅ Одобрить", Data: "a:" + strconv.Itoa(im.ID)},
 			{Text: "❌ Отклонить", Data: "r:" + strconv.Itoa(im.ID)},
 		}}
-		msgID, err := telegram.SendPhotoWithButtons(cfg.TelegramToken, cfg.ModerationChat, tmp, caption, "", buttons)
+		msgID, err := telegram.SendPhotoWithButtons(cfg.TelegramToken, modChat, tmp, caption, "", buttons)
 		os.Remove(tmp)
 		if err != nil {
-			fmt.Printf("  ! id=%d отправка в чат модерации: %v\n", im.ID, err)
-			return err // вероятно проблема с доступом к чату — прекращаем пуш до след. цикла
+			return sent, err
 		}
-		// перечитываем и сохраняем точечно, чтобы не затирать параллельные правки
 		fresh, err := store.Load(statePath)
 		if err != nil {
-			return err
+			return sent, err
 		}
 		fresh.SetModMsg(im.ID, msgID)
 		if err := fresh.Save(); err != nil {
-			return err
+			return sent, err
 		}
-		fmt.Printf("  → на модерацию: id=%d (msg %d)\n", im.ID, msgID)
+		sent++
 	}
-	return nil
+	return sent, nil
 }
 
-// handleUpdate обрабатывает нажатие кнопки: одобрить/отклонить картинку.
-func handleUpdate(cfg config.Config, statePath string, u telegram.Update) {
-	cq := u.CallbackQuery
-	if cq == nil || cq.Data == "" {
+// handleCallback обрабатывает нажатие кнопки: одобрить/отклонить (только владелец).
+func handleCallback(cfg config.Config, statePath, modChat string, cq *telegram.CallbackQuery) {
+	if !authorized(cq.From, cfg.OwnerID) {
+		_ = telegram.AnswerCallback(cfg.TelegramToken, cq.ID, "⛔ не для вас")
 		return
 	}
 	action, idStr, ok := strings.Cut(cq.Data, ":")
@@ -108,24 +158,23 @@ func handleUpdate(cfg config.Config, statePath string, u telegram.Update) {
 	if err != nil {
 		return
 	}
-
 	st, err := store.Load(statePath)
 	if err != nil {
 		_ = telegram.AnswerCallback(cfg.TelegramToken, cq.ID, "ошибка состояния")
 		return
 	}
-	var toast, mark string
+	var mark string
 	switch action {
 	case "a":
 		if st.Approve(id) {
-			toast, mark = "✅ Одобрено", "✅ Одобрено"
+			mark = "✅ Одобрено"
 		}
 	case "r":
 		if st.Reject(id) {
-			toast, mark = "❌ Отклонено", "❌ Отклонено"
+			mark = "❌ Отклонено"
 		}
 	}
-	if toast == "" {
+	if mark == "" {
 		_ = telegram.AnswerCallback(cfg.TelegramToken, cq.ID, "уже обработано")
 		return
 	}
@@ -133,18 +182,16 @@ func handleUpdate(cfg config.Config, statePath string, u telegram.Update) {
 		_ = telegram.AnswerCallback(cfg.TelegramToken, cq.ID, "ошибка сохранения")
 		return
 	}
-	_ = telegram.AnswerCallback(cfg.TelegramToken, cq.ID, toast)
+	_ = telegram.AnswerCallback(cfg.TelegramToken, cq.ID, mark)
 	if cq.Message != nil {
-		_ = telegram.EditCaption(cfg.TelegramToken, cfg.ModerationChat, cq.Message.MessageID,
+		_ = telegram.EditCaption(cfg.TelegramToken, modChat, cq.Message.MessageID,
 			fmt.Sprintf("%s · id %d", mark, id), "")
 	}
 }
 
-// cmdChatID помогает узнать id чата модерации: слушает обновления и печатает,
-// от каких чатов приходят сообщения (добавь бота в группу/канал и напиши туда).
+// cmdChatID помогает узнать свой user_id: напиши боту в личку любое сообщение.
 func cmdChatID(cfg config.Config) error {
-	fmt.Println("Узнаём id чата. Добавь бота в приватную группу/канал и напиши там любое")
-	fmt.Println("сообщение (в канал — сделай пост). Жду 60 сек... Ctrl+C — выход.")
+	fmt.Println("Напиши боту в личку любое сообщение. Жду 60 сек… Ctrl+C — выход.")
 	deadline := time.Now().Add(60 * time.Second)
 	var offset int64
 	seen := map[int64]bool{}
@@ -155,25 +202,21 @@ func cmdChatID(cfg config.Config) error {
 		}
 		for _, u := range updates {
 			offset = u.UpdateID + 1
-			var ch *telegram.Chat
+			var from *telegram.User
 			if u.Message != nil {
-				ch = &u.Message.Chat
-			} else if u.CallbackQuery != nil && u.CallbackQuery.Message != nil {
-				ch = &u.CallbackQuery.Message.Chat
+				from = u.Message.From
+			} else if u.CallbackQuery != nil {
+				from = u.CallbackQuery.From
 			}
-			if ch != nil && !seen[ch.ID] {
-				seen[ch.ID] = true
-				name := ch.Title
-				if name == "" {
-					name = "@" + ch.Username
-				}
-				fmt.Printf("  чат: id=%d  тип=%s  %s\n", ch.ID, ch.Type, name)
-				fmt.Printf("       → впиши в moderation_chat: \"%d\"\n", ch.ID)
+			if from != nil && !seen[from.ID] {
+				seen[from.ID] = true
+				fmt.Printf("  user_id=%d  @%s  %s\n", from.ID, from.Username, from.FirstName)
+				fmt.Printf("       → впиши в owner_id: %d\n", from.ID)
 			}
 		}
 	}
 	if len(seen) == 0 {
-		fmt.Println("Ничего не поймал. Проверь, что бот добавлен в чат и там есть сообщение.")
+		fmt.Println("Ничего не поймал. Напиши боту в личку и попробуй снова.")
 	}
 	return nil
 }
